@@ -1,0 +1,181 @@
+# IMPORTANT: RUN THIS CELL IN ORDER TO IMPORT YOUR KAGGLE DATA SOURCES
+# TO THE CORRECT LOCATION (/kaggle/input) IN YOUR NOTEBOOK,
+# THEN FEEL FREE TO DELETE THIS CELL.
+# NOTE: THIS NOTEBOOK ENVIRONMENT DIFFERS FROM KAGGLE'S PYTHON
+# ENVIRONMENT SO THERE MAY BE MISSING LIBRARIES USED BY YOUR
+# NOTEBOOK.
+
+import os
+import sys
+from tempfile import NamedTemporaryFile
+from urllib.request import urlopen
+from urllib.parse import unquote, urlparse
+from urllib.error import HTTPError
+from zipfile import ZipFile
+import tarfile
+import shutil
+
+CHUNK_SIZE = 40960
+DATA_SOURCE_MAPPING = 'lfw-dataset:https%3A%2F%2Fstorage.googleapis.com%2Fkaggle-data-sets%2F26922%2F34595%2Fbundle%2Farchive.zip%3FX-Goog-Algorithm%3DGOOG4-RSA-SHA256%26X-Goog-Credential%3Dgcp-kaggle-com%2540kaggle-161607.iam.gserviceaccount.com%252F20240418%252Fauto%252Fstorage%252Fgoog4_request%26X-Goog-Date%3D20240418T145409Z%26X-Goog-Expires%3D259200%26X-Goog-SignedHeaders%3Dhost%26X-Goog-Signature%3D87430a8e8ca7e8d69355f735ca6f88274a16c9d6a7602ada9e101b4bca7dbe499f928808aced336f7d716b4d70869421334561dc66418f0ed5bbd54577e19effdbe573f5e088fe9af68667a4ec0f6d501fb3a339b8ea11f9709be1b2b865837b04fe8f183df0270bf06f7c28ddb1b81bea42d85829afcc4bf61cf97abae1305cbcc678cdfb564853d42df424be18d098bfc9405bd2a0939634b62b8211b8e622ec6b5bae076c355d3b649c8765f12c33d828a857904ca8975bfecef3e4e0fcd6f0c121beae4b4d26ce412384a6c0857d896e3d613f0bde013253d69dd7a517f2edeb601cbb53a819c66b68ca593da1f7dcef3b667cd9bd3e291b6bd971dd7312'
+
+KAGGLE_INPUT_PATH='/kaggle/input'
+KAGGLE_WORKING_PATH='/kaggle/working'
+KAGGLE_SYMLINK='kaggle'
+
+!umount /kaggle/input/ 2> /dev/null
+shutil.rmtree('/kaggle/input', ignore_errors=True)
+os.makedirs(KAGGLE_INPUT_PATH, 0o777, exist_ok=True)
+os.makedirs(KAGGLE_WORKING_PATH, 0o777, exist_ok=True)
+
+try:
+  os.symlink(KAGGLE_INPUT_PATH, os.path.join("..", 'input'), target_is_directory=True)
+except FileExistsError:
+  pass
+try:
+  os.symlink(KAGGLE_WORKING_PATH, os.path.join("..", 'working'), target_is_directory=True)
+except FileExistsError:
+  pass
+
+for data_source_mapping in DATA_SOURCE_MAPPING.split(','):
+    directory, download_url_encoded = data_source_mapping.split(':')
+    download_url = unquote(download_url_encoded)
+    filename = urlparse(download_url).path
+    destination_path = os.path.join(KAGGLE_INPUT_PATH, directory)
+    try:
+        with urlopen(download_url) as fileres, NamedTemporaryFile() as tfile:
+            total_length = fileres.headers['content-length']
+            print(f'Downloading {directory}, {total_length} bytes compressed')
+            dl = 0
+            data = fileres.read(CHUNK_SIZE)
+            while len(data) > 0:
+                dl += len(data)
+                tfile.write(data)
+                done = int(50 * dl / int(total_length))
+                sys.stdout.write(f"\r[{'=' * done}{' ' * (50-done)}] {dl} bytes downloaded")
+                sys.stdout.flush()
+                data = fileres.read(CHUNK_SIZE)
+            if filename.endswith('.zip'):
+              with ZipFile(tfile) as zfile:
+                zfile.extractall(destination_path)
+            else:
+              with tarfile.open(tfile.name) as tarfile:
+                tarfile.extractall(destination_path)
+            print(f'\nDownloaded and uncompressed: {directory}')
+    except HTTPError as e:
+        print(f'Failed to load (likely expired) {download_url} to path {destination_path}')
+        continue
+    except OSError as e:
+        print(f'Failed to load {download_url} to path {destination_path}')
+        continue
+
+print('Data source import complete.')
+# general functions
+import os
+import cv2
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+from collections import OrderedDict
+# visualization
+from PIL import Image
+# identifying faces
+%pip install mtcnn
+from mtcnn.mtcnn import MTCNN
+# visualizing bounding boxes
+import matplotlib.patches as patches
+# CNN
+import keras
+from sklearn.model_selection import train_test_split
+# Moving files between directories
+import shutil
+from shutil import unpack_archive
+from subprocess import check_output
+
+dataset_path = "../input/lfw-dataset/lfw-deepfunneled/lfw-deepfunneled/"
+# Data read-in and cleaning
+
+lfw_allnames = pd.read_csv("../input/lfw-dataset/lfw_allnames.csv")
+matchpairsDevTest = pd.read_csv("../input/lfw-dataset/matchpairsDevTest.csv")
+matchpairsDevTrain = pd.read_csv("../input/lfw-dataset/matchpairsDevTrain.csv")
+mismatchpairsDevTest = pd.read_csv("../input/lfw-dataset/mismatchpairsDevTest.csv")
+mismatchpairsDevTrain = pd.read_csv("../input/lfw-dataset/mismatchpairsDevTrain.csv")
+pairs = pd.read_csv("../input/lfw-dataset/pairs.csv")
+# tidy pairs data: 
+pairs = pairs.rename(columns ={'name': 'name1', 'Unnamed: 3': 'name2'})
+matched_pairs = pairs[pairs["name2"].isnull()].drop("name2",axis=1)
+mismatched_pairs = pairs[pairs["name2"].notnull()]
+people = pd.read_csv("../input/lfw-dataset/people.csv")
+# remove null values
+people = people[people.name.notnull()]
+peopleDevTest = pd.read_csv("../input/lfw-dataset/peopleDevTest.csv")
+peopleDevTrain = pd.read_csv("../input/lfw-dataset/peopleDevTrain.csv")
+print("Summary:")
+print("There are " + 
+      str(lfw_allnames.shape[0]) + 
+      " unique celebrities in the entire dataset, of whom " + 
+      str(sum(lfw_allnames.images > 1)) + 
+      " are represented by multiple images. The entire number of images available is " + 
+      str(sum(lfw_allnames.images)) + 
+      ". The most represented celebrity is " + 
+      str(lfw_allnames.iloc[lfw_allnames['images'].idxmax()][0]) + 
+      ", with " + 
+      str(max(lfw_allnames.images)) + 
+      " unique images in the dataset.")
+# shape data frame so there is a row per image, matched to relevant jpg file
+image_paths = lfw_allnames.loc[lfw_allnames.index.repeat(lfw_allnames['images'])]
+image_paths['image_path'] = 1 + image_paths.groupby('name').cumcount()
+image_paths['image_path'] = image_paths.image_path.apply(lambda x: '{0:0>4}'.format(x))
+image_paths['image_path'] = image_paths.name + "/" + image_paths.name + "_" + image_paths.image_path + ".jpg"
+image_paths = image_paths.drop("images", axis=1)
+
+# take a random sample: 80% of the data for the test set
+lfw_train, lfw_test = train_test_split(image_paths, test_size=0.2)
+lfw_train = lfw_train.reset_index().drop("index", axis=1)
+lfw_test = lfw_test.reset_index().drop("index", axis=1)
+
+# verify that there is a mix of seen and unseen individuals in the test set
+print(len(set(lfw_train.name).intersection(set(lfw_test.name))))
+print(len(set(lfw_test.name) - set(lfw_train.name)))
+
+# both comprehensively non-empty - we are ok to proceed.
+# N.B. although we don't use this training/test split in the following model, this is the format of the data we
+# would use in applying models to the full dataset
+# verify resolution of all images is consistent
+widths = []
+heights = []
+files = image_paths.image_path
+for file in files:
+    path = "../input/lfw-dataset/lfw-deepfunneled/lfw-deepfunneled/" + str(file)
+    im = Image.open(path)
+    widths.append(im.width)
+    heights.append(im.height)
+
+pd.DataFrame({'height':heights,'width':widths}).describe()
+
+# all 250 x 250 resolution
+image_paths['name'].value_counts()[:10].plot(kind = "bar")
+ind_counts = image_paths.groupby('name').count().image_path
+print(str(sum(ind_counts[ind_counts==1])) + " individuals, which is " + str(round(100*(sum(ind_counts[ind_counts==1])/sum(ind_counts)))) + "% of the total individuals considered, are only represented by a single image in this dataset.")
+im = Image.open("../input/lfw-dataset/lfw-deepfunneled/lfw-deepfunneled/" + str(lfw_train.image_path[0]))
+plt.imshow(im)
+# Use out-of-the-box MTCNN algorithm to identify facial boundaries on a sample image
+detector = MTCNN()
+image = cv2.imread("../input/lfw-dataset/lfw-deepfunneled/lfw-deepfunneled/" + str(lfw_train.image_path[0]))
+result = detector.detect_faces(image)
+# That's it - the results have already been generated! Now we extract the boundaries that have been identified 
+bounding_box = result[0]['box']
+keypoints = result[0]['keypoints']
+
+# Finally, we plot the image along with the face's bounding box and internal features (eyes, nose, and mouth corners)
+fig,ax = plt.subplots(1)
+ax.imshow(image)
+# Create a Rectangle patch
+rect = patches.Rectangle(bounding_box[0:2],bounding_box[2],bounding_box[3],linewidth=1,edgecolor='r',facecolor='none')
+# Add the patch to the Axes
+ax.add_patch(rect)
+# Visualize all the internal features
+for key in keypoints:
+    rect_key = patches.Rectangle(keypoints[key],1,1,linewidth=10,edgecolor='r',facecolor='none')
+    ax.add_patch(rect_key)
+# Show the plots
+plt.show()
